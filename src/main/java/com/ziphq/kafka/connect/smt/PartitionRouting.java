@@ -1,15 +1,16 @@
 package com.ziphq.kafka.connect.smt;
 
 
-import io.debezium.DebeziumException;
 import io.debezium.config.Configuration;
 import io.debezium.config.EnumeratedValue;
 import io.debezium.config.Field;
 import io.debezium.data.Envelope;
 import io.debezium.transforms.SmtManager;
 import io.debezium.util.MurmurHash3;
+import io.debezium.connector.AbstractSourceInfo;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
+import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
@@ -17,12 +18,10 @@ import org.apache.kafka.connect.transforms.Transformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.nio.ByteBuffer;
+import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Collectors;
+
 
 import static io.debezium.data.Envelope.FieldName.*;
 
@@ -34,8 +33,6 @@ import static io.debezium.data.Envelope.FieldName.*;
  */
 public class PartitionRouting<R extends ConnectRecord<R>> implements Transformation<R> {
 
-    public static final String NESTING_SEPARATOR = "\\.";
-    public static final String CHANGE_SPECIAL_FIELD = "change";
     public static final String FIELD_PAYLOAD_FIELD_CONF = "partition.payload.fields";
     public static final String FIELD_TOPIC_PARTITION_NUM_CONF = "partition.topic.num";
     public static final String FIELD_HASH_FUNCTION = "partition.hash.function";
@@ -72,26 +69,6 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
     private int partitionNumber;
     private HashFunction hashFc;
 
-    private static Struct getLastStruct(Struct envelope, String[] subFields) {
-
-        Struct currectStruct = envelope;
-        for (int i = 0; i < subFields.length - 1; i++) {
-
-            String fieldName = getFieldName(envelope, subFields, i);
-            currectStruct = currectStruct.getStruct(fieldName);
-        }
-        return currectStruct;
-    }
-
-    private static String getFieldName(Struct envelope, String[] subFields, int i) {
-
-        String fieldName = subFields[i];
-        if (CHANGE_SPECIAL_FIELD.equals(subFields[i])) {
-            Envelope.Operation operation = Envelope.Operation.forCode(envelope.getString(OPERATION));
-            fieldName = Envelope.Operation.DELETE.equals(operation) ? BEFORE : AFTER;
-        }
-        return fieldName;
-    }
 
     @Override
     public ConfigDef config() {
@@ -118,58 +95,86 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
 
     @Override
     public R apply(R originalRecord) {
-        LOGGER.trace("Starting PartitionRouting SMT with conf: {} {}", payloadFields, partitionNumber);
-        LOGGER.trace("xxxx {}", originalRecord);
+        LOGGER.info("xxxx {}", originalRecord);
 
         if (originalRecord.value() == null || !smtManager.isValidEnvelope(originalRecord)) {
-            LOGGER.trace("Skipping tombstone or message without envelope");
+            LOGGER.info("Skipping tombstone or message without envelope");
             return originalRecord;
         }
 
         final Struct envelope = (Struct) originalRecord.value();
         try {
-
             if (SmtManager.isGenericOrTruncateMessage((SourceRecord) originalRecord)) {
+                LOGGER.info("Skip generic or truncate messages");
+                return originalRecord;
+            }
+            LOGGER.info("xxxx envelope {}", envelope);
+
+            Optional<String> organizationGuid = getOrganizationGuid(envelope);
+            LOGGER.info("xxx org guid {}", organizationGuid);
+            System.out.println("xxx org guid " + organizationGuid);
+            if (organizationGuid.isEmpty()) {
                 return originalRecord;
             }
 
-            List<Object> fieldsValue = payloadFields.stream()
-                    .map(fieldName -> toValue(fieldName, envelope))
-                    .filter(Optional::isPresent)
-                    .map(Optional::get)
-                    .collect(Collectors.toList());
-
-            if (fieldsValue.isEmpty()) {
-                LOGGER.trace("None of the configured fields found on record {}. Skipping it.", envelope);
-                return originalRecord;
-            }
-
-            int partition = computePartition(partitionNumber, fieldsValue);
-
+            int partition = calPartition(partitionNumber, organizationGuid.get());
+            LOGGER.info("xxx partition {} {}", partition, partitionNumber);
+            System.out.println("xxx partition " + partition + " " + partitionNumber);
             return buildNewRecord(originalRecord, envelope, partition);
-
         } catch (Exception e) {
-            throw new DebeziumException(String.format("Unprocessable message %s", envelope), e);
+            // throw new DebeziumException(String.format("Unprocessable message %s", envelope), e);
+            LOGGER.error("{}", e);
+            return originalRecord;
         }
     }
 
-    private Optional<Object> toValue(String fieldName, Struct envelope) {
-
+    static Optional<String> getOrganizationGuid(Struct envelope) {
         try {
-            String[] subFields = Arrays.stream(fieldName.split(NESTING_SEPARATOR)).map(String::trim).toArray(String[]::new);
+            Struct source = envelope.getStruct(SOURCE);
+            String table_name = source.getString(AbstractSourceInfo.TABLE_NAME_KEY);
 
-            if (subFields.length == 1) {
-                return Optional.ofNullable(envelope.get(subFields[0]));
+            Envelope.Operation operation = Envelope.Operation.forCode(envelope.getString(OPERATION));
+            String before_or_after = Envelope.Operation.DELETE.equals(operation) ? BEFORE : AFTER;
+
+            String org_guid = null;
+            if (table_name.equals("object")) {
+                Struct s = envelope.getStruct(before_or_after);
+                org_guid = s.getString("organization_guid");
+            } else if (table_name.equals("association")) {
+                Struct s = envelope.getStruct(before_or_after);
+                byte[] source_org_guid = s.getBytes("source_organization_guid");
+                byte[] target_org_guid = s.getBytes("target_organization_guid");
+                if (source_org_guid != null) {
+                    org_guid = convertBytesToUUID(source_org_guid);
+                } else if (target_org_guid != null) {
+                    org_guid =  convertBytesToUUID(target_org_guid);
+                }
+            } else {
+                // This includes
+                // 1. object_column_index table => has organization_guid field
+                // 2. broken out tables => has organization_guid field
+                // 3. other tables such as object_type => does not have organization_guid field
+                Struct s = envelope.getStruct(before_or_after);
+                org.apache.kafka.connect.data.Field org_guid_field = s.schema().field("organization_guid");
+                if (org_guid_field != null) {
+                    if (org_guid_field.schema().type() == Schema.Type.STRING) {
+                        org_guid = s.getString("organization_guid");
+                    } else if (org_guid_field.schema().type() == Schema.Type.BYTES) {
+                        byte[] bs = s.getBytes("organization_guid");
+                        if (bs != null) {
+                            org_guid = convertBytesToUUID(bs);
+                        }
+                    } else {
+                        LOGGER.error("Table {} has wrong type for organization_guid field.", table_name);
+                    }
+                }
             }
 
-            Struct lastStruct = getLastStruct(envelope, subFields);
-
-            return Optional.ofNullable(lastStruct.get(subFields[subFields.length - 1]));
+            return Optional.ofNullable(org_guid);
         } catch (DataException e) {
-            LOGGER.trace("Field {} not found on payload {}. It will not be considered", fieldName, envelope);
+            LOGGER.info("Fail to extract organization guid in payload {}. It will not be considered", envelope);
             return Optional.empty();
         }
-
     }
 
     private R buildNewRecord(R originalRecord, Struct envelope, int partition) {
@@ -184,17 +189,23 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
                 originalRecord.headers());
     }
 
-    protected int computePartition(Integer partitionNumber, List<Object> values) {
-        int totalHashCode = values.stream().map(hashFc.getHash()).reduce(0, Integer::sum);
+    protected int calPartition(Integer partitionNumber, String orgGuid) {
+        int hashCode = hashFc.getHash().apply(orgGuid);
         // hashCode can be negative due to overflow. Since Math.abs(Integer.MIN_INT) will still return a negative number
         // we use bitwise operation to remove the sign
-        int normalizedHash = totalHashCode & Integer.MAX_VALUE;
+        int normalizedHash = hashCode & Integer.MAX_VALUE;
         if (normalizedHash == Integer.MAX_VALUE) {
             normalizedHash = 0;
         }
         return normalizedHash % partitionNumber;
     }
 
+    static String convertBytesToUUID(byte[] bytes) {
+        ByteBuffer byteBuffer = ByteBuffer.wrap(bytes);
+        long high = byteBuffer.getLong();
+        long low = byteBuffer.getLong();
+        return new UUID(high, low).toString();
+    }
     @Override
     public void close() {
     }
