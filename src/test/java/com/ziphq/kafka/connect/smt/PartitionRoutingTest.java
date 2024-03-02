@@ -117,7 +117,7 @@ public class PartitionRoutingTest {
 
     @Test
     public void bytesToUUID() {
-        String uuid = PartitionRouting.convertBytesToUUID(HexFormat.of().parseHex("2810200F8F0647F98382DCCBF98D0E40"));
+        String uuid = PartitionRouting.convertBytesToUUID(hexStringToByteArray(("2810200F8F0647F98382DCCBF98D0E40")));
         assertEquals(uuid, "2810200f-8f06-47f9-8382-dccbf98d0e40");
     }
 
@@ -287,8 +287,8 @@ public class PartitionRoutingTest {
                 .put("target_guid", "5c96d688-9c05-4e03-81a2-1311e0baa85f")
                 .put("target_id", 47072328L)
                 .put("updated_at", 1709243987000L)
-                .put("source_organization_guid", ByteBuffer.wrap(HexFormat.of().parseHex(sourceOrgGuid)))
-                .put("target_organization_guid", ByteBuffer.wrap(HexFormat.of().parseHex(targetOrgGuid)));
+                .put("source_organization_guid", ByteBuffer.wrap(hexStringToByteArray(sourceOrgGuid)))
+                .put("target_organization_guid", ByteBuffer.wrap(hexStringToByteArray(targetOrgGuid)));
     }
 
     private Struct buildObjectColumnIndexRow(String orgGuid) {
@@ -321,5 +321,15 @@ public class PartitionRoutingTest {
                 .put("account_number",  "0100000000000100158")
                 .put("amount_su", 7433L)
                 .put("currency", "USD");
+    }
+
+    private static byte[] hexStringToByteArray(String s) {
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i+1), 16));
+        }
+        return data;
     }
 }

@@ -122,3 +122,14 @@ curl -X POST -H "Content-Type: application/json" localhost:8083/connectors -d '
 1. Add one more unit test for DDL event.
 2. Set up Java linter.
 3. Set up workflow to run unit test and linter.
+
+
+## pitfalls
+
+Use the correct version of Java 11.
+
+```
+[Worker-07f756707cf5fbae8] Caused by: java.lang.UnsupportedClassVersionError: 
+com/ziphq/kafka/connect/smt/PartitionRouting has been compiled by a more recent version of the Java 
+Runtime (class file version 61.0), this version of the Java Runtime only recognizes class file versions up to 55.0
+```
