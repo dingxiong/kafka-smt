@@ -110,7 +110,6 @@ public class PartitionRoutingTest {
     static {
         Map<String, Object> props = new HashMap<>();
         props.put(PartitionRouting.FIELD_TOPIC_PARTITION_NUM_CONF, 6);
-        props.put(PartitionRouting.FIELD_PAYLOAD_FIELD_CONF, new String[]{});
         props.put(PartitionRouting.FIELD_HASH_FUNCTION, "murmur");
         partitionRoutingTransformation.configure(props);
     }

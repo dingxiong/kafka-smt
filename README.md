@@ -27,35 +27,43 @@ mvn test
 ## Prepare the package
 ```bash
 build_debezium() {
+    pushd . 
 
-pushd . 
+    rm -rf /tmp/tmpwork && mkdir -p /tmp/tmpwork
+    cd /tmp/tmpwork
 
-rm -rf /tmp/tmpwork && mkdir -p /tmp/tmpwork
-cd /tmp/tmpwork
+    wget https://repo1.maven.org/maven2/io/debezium/debezium-connector-mysql/2.5.1.Final/debezium-connector-mysql-2.5.1.Final-plugin.tar.gz
+    tar xvzf debezium-connector-mysql-2.5.1.Final-plugin.tar.gz
 
-wget https://repo1.maven.org/maven2/io/debezium/debezium-connector-mysql/2.5.1.Final/debezium-connector-mysql-2.5.1.Final-plugin.tar.gz
-tar xvzf debezium-connector-mysql-2.5.1.Final-plugin.tar.gz
+    # Then, download kafka aws secret manager from https://www.confluent.io/hub/jcustenborder/kafka-config-provider-aws
+    wget https://d1i4a15mxbxib1.cloudfront.net/api/plugins/jcustenborder/kafka-config-provider-aws/versions/0.1.2/jcustenborder-kafka-config-provider-aws-0.1.2.zip
+    unzip jcustenborder-kafka-config-provider-aws-0.1.2.zip
+    mv jcustenborder-kafka-config-provider-aws-0.1.2/lib/* debezium-connector-mysql
 
-# Then, download kafka aws secret manager from https://www.confluent.io/hub/jcustenborder/kafka-config-provider-aws
-wget https://d1i4a15mxbxib1.cloudfront.net/api/plugins/jcustenborder/kafka-config-provider-aws/versions/0.1.2/jcustenborder-kafka-config-provider-aws-0.1.2.zip
-unzip jcustenborder-kafka-config-provider-aws-0.1.2.zip
-mv jcustenborder-kafka-config-provider-aws-0.1.2/lib/* debezium-connector-mysql
+    # Download Guava. See https://github.com/jcustenborder/kafka-config-provider-aws/issues/2
+    wget https://repo1.maven.org/maven2/com/google/guava/guava/31.1-jre/guava-31.1-jre.jar
+    mv guava-31.1-jre.jar debezium-connector-mysql
 
-# Download Guava. See https://github.com/jcustenborder/kafka-config-provider-aws/issues/2
-wget https://repo1.maven.org/maven2/com/google/guava/guava/31.1-jre/guava-31.1-jre.jar
-mv guava-31.1-jre.jar debezium-connector-mysql
+    # Add kafka-smt
+    mv ~/code/kafka-smt/target/partition-routing-1.0.jar debezium-connector-mysql 
 
-# Add kafka-smt
-mv ~/code/kafka-smt/target/partition-routing-1.0.jar debezium-connector-mysql 
+    # move to plugin folder
+    rm -rf /tmp/kafka-connect/plugins/debezium
+    mkdir -p /tmp/kafka-connect/plugins/debezium 
+    mv debezium-connector-mysql/* /tmp/kafka-connect/plugins/debezium/
 
-# move to plugin folder
-rm -rf /tmp/kafka-connect/plugins/debezium
-mkdir -p /tmp/kafka-connect/plugins/debezium 
-mv debezium-connector-mysql/* /tmp/kafka-connect/plugins/debezium/
-
-popd
+    popd
 }
 ```
+
+To upload the plugin to s3 
+```
+cd /tmp/kafka-connect/plugins/debezium/
+zip -9 ../debezium-connector-mysql-2.5.1-aws-config-provider-0.1.2.zip *
+cd ..
+aws s3 cp debezium-connector-mysql-2.5.1-aws-config-provider-0.1.2.zip s3://zip-kafka-connect-plugins/ --profile=admin
+```
+
 
 If connector config is not changed, then just restart kafka connect.
 Otherwise, we also need to delete teh connector and recreate it.
@@ -103,10 +111,14 @@ curl -X POST -H "Content-Type: application/json" localhost:8083/connectors -d '
 				"transforms.Reroute.topic.regex": "(.*)",
 				"transforms.Reroute.topic.replacement": "database-1.admincoin.mutations",
 			    "transforms.PartitionRouting.type": "com.ziphq.kafka.connect.smt.PartitionRouting",
-                "transforms.PartitionRouting.partition.payload.fields": "before.last_name",
                 "transforms.PartitionRouting.partition.topic.num": 6,
                 "transforms.PartitionRouting.partition.hash.function": "murmur"
     }
 }
 '
 ```
+
+## TODO:
+1. Add one more unit test for DDL event.
+2. Set up Java linter.
+3. Set up workflow to run unit test and linter.

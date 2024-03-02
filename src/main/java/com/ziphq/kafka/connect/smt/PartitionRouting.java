@@ -33,21 +33,8 @@ import static io.debezium.data.Envelope.FieldName.*;
  */
 public class PartitionRouting<R extends ConnectRecord<R>> implements Transformation<R> {
 
-    public static final String FIELD_PAYLOAD_FIELD_CONF = "partition.payload.fields";
     public static final String FIELD_TOPIC_PARTITION_NUM_CONF = "partition.topic.num";
     public static final String FIELD_HASH_FUNCTION = "partition.hash.function";
-    static final Field PARTITION_PAYLOAD_FIELDS_FIELD = Field.create(FIELD_PAYLOAD_FIELD_CONF)
-            .withDisplayName("List of payload fields to use for compute partition.")
-            .withType(ConfigDef.Type.LIST)
-            .withImportance(ConfigDef.Importance.HIGH)
-            .withValidation(
-                    Field::notContainEmptyElements)
-            .withDescription("Payload fields to use to calculate the partition. Supports Struct nesting using dot notation." +
-                    "To access fields related to data collections, you can use: after, before or change, " +
-                    "where 'change' is a special field that will automatically choose, based on operation, the 'after' or 'before'. " +
-                    "If a field not exist for the current record it will simply not used" +
-                    "e.g. after.name,source.table,change.name")
-            .required();
     static final Field TOPIC_PARTITION_NUM_FIELD = Field.create(FIELD_TOPIC_PARTITION_NUM_CONF)
             .withDisplayName("Number of partition configured for topic")
             .withType(ConfigDef.Type.INT)
@@ -63,9 +50,7 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
             .withDefault("java")
             .optional();
     private static final Logger LOGGER = LoggerFactory.getLogger(PartitionRouting.class);
-    private static final MurmurHash3 MURMUR_HASH_3 = MurmurHash3.getInstance();
     private SmtManager<R> smtManager;
-    private List<String> payloadFields;
     private int partitionNumber;
     private HashFunction hashFc;
 
@@ -75,8 +60,7 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
 
         ConfigDef config = new ConfigDef();
         // group does not manage validator definition. Validation will not work here.
-        return Field.group(config, "partitions",
-                PARTITION_PAYLOAD_FIELDS_FIELD, TOPIC_PARTITION_NUM_FIELD, HASH_FUNCTION_FIELD);
+        return Field.group(config, "partitions", TOPIC_PARTITION_NUM_FIELD, HASH_FUNCTION_FIELD);
     }
 
     @Override
@@ -86,44 +70,36 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
 
         smtManager = new SmtManager<>(config);
 
-        smtManager.validate(config, Field.setOf(PARTITION_PAYLOAD_FIELDS_FIELD, TOPIC_PARTITION_NUM_FIELD));
+        smtManager.validate(config, Field.setOf(TOPIC_PARTITION_NUM_FIELD));
 
-        payloadFields = config.getList(PARTITION_PAYLOAD_FIELDS_FIELD);
         partitionNumber = config.getInteger(TOPIC_PARTITION_NUM_FIELD);
         hashFc = HashFunction.parse(config.getString(HASH_FUNCTION_FIELD));
     }
 
     @Override
     public R apply(R originalRecord) {
-        LOGGER.info("xxxx {}", originalRecord);
 
         if (originalRecord.value() == null || !smtManager.isValidEnvelope(originalRecord)) {
-            LOGGER.info("Skipping tombstone or message without envelope");
+            LOGGER.trace("Skipping tombstone or message without envelope");
             return originalRecord;
         }
 
         final Struct envelope = (Struct) originalRecord.value();
         try {
             if (SmtManager.isGenericOrTruncateMessage((SourceRecord) originalRecord)) {
-                LOGGER.info("Skip generic or truncate messages");
+                LOGGER.trace("Skip generic or truncate messages");
                 return originalRecord;
             }
-            LOGGER.info("xxxx envelope {}", envelope);
 
             Optional<String> organizationGuid = getOrganizationGuid(envelope);
-            LOGGER.info("xxx org guid {}", organizationGuid);
-            System.out.println("xxx org guid " + organizationGuid);
             if (organizationGuid.isEmpty()) {
                 return originalRecord;
             }
 
             int partition = calPartition(partitionNumber, organizationGuid.get());
-            LOGGER.info("xxx partition {} {}", partition, partitionNumber);
-            System.out.println("xxx partition " + partition + " " + partitionNumber);
             return buildNewRecord(originalRecord, envelope, partition);
         } catch (Exception e) {
-            // throw new DebeziumException(String.format("Unprocessable message %s", envelope), e);
-            LOGGER.error("{}", e);
+            LOGGER.error("Fail to process event {}",originalRecord,  e);
             return originalRecord;
         }
     }
@@ -172,7 +148,7 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
 
             return Optional.ofNullable(org_guid);
         } catch (DataException e) {
-            LOGGER.info("Fail to extract organization guid in payload {}. It will not be considered", envelope);
+            LOGGER.info("Fail to extract organization guid in payload {}.", envelope);
             return Optional.empty();
         }
     }
