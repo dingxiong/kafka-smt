@@ -17,8 +17,6 @@ import org.apache.kafka.connect.source.SourceRecord;
 import org.junit.Test;
 
 public class PartitionRoutingTest {
-  /*
-   * */
   public static final Schema OBJECT_SCHEMA =
       SchemaBuilder.struct()
           .name("database-1.admincoin.mutations.Value")

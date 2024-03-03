@@ -140,4 +140,3 @@ aws s3 cp debezium-connector-mysql-2.5.1-aws-config-provider-0.1.2.zip s3://zip-
 
 ## TODO:
 1. Add one more unit test for DDL event.
-2. Set up workflow to run unit test and linter.
