@@ -109,46 +109,46 @@ public class PartitionRouting<R extends ConnectRecord<R>> implements Transformat
   static Optional<String> getOrganizationGuid(Struct envelope) {
     try {
       Struct source = envelope.getStruct(SOURCE);
-      String table_name = source.getString(AbstractSourceInfo.TABLE_NAME_KEY);
+      String tableName = source.getString(AbstractSourceInfo.TABLE_NAME_KEY);
 
       Envelope.Operation operation = Envelope.Operation.forCode(envelope.getString(OPERATION));
-      String before_or_after = Envelope.Operation.DELETE.equals(operation) ? BEFORE : AFTER;
+      String beforeOrAfter = Envelope.Operation.DELETE.equals(operation) ? BEFORE : AFTER;
 
-      String org_guid = null;
-      if (table_name.equals("object")) {
-        Struct s = envelope.getStruct(before_or_after);
-        org_guid = s.getString("organization_guid");
-      } else if (table_name.equals("association")) {
-        Struct s = envelope.getStruct(before_or_after);
-        byte[] source_org_guid = s.getBytes("source_organization_guid");
-        byte[] target_org_guid = s.getBytes("target_organization_guid");
-        if (source_org_guid != null) {
-          org_guid = convertBytesToUUID(source_org_guid);
-        } else if (target_org_guid != null) {
-          org_guid = convertBytesToUUID(target_org_guid);
+      String orgGuid = null;
+      if (tableName.equals("object")) {
+        Struct s = envelope.getStruct(beforeOrAfter);
+        orgGuid = s.getString("organization_guid");
+      } else if (tableName.equals("association")) {
+        Struct s = envelope.getStruct(beforeOrAfter);
+        byte[] sourceOrgGuid = s.getBytes("source_organization_guid");
+        byte[] targetOrgGuid = s.getBytes("target_organization_guid");
+        if (sourceOrgGuid != null) {
+          orgGuid = convertBytesToUUID(sourceOrgGuid);
+        } else if (targetOrgGuid != null) {
+          orgGuid = convertBytesToUUID(targetOrgGuid);
         }
       } else {
         // This includes
         // 1. object_column_index table => has organization_guid field
         // 2. broken out tables => has organization_guid field
         // 3. other tables such as object_type => does not have organization_guid field
-        Struct s = envelope.getStruct(before_or_after);
-        org.apache.kafka.connect.data.Field org_guid_field = s.schema().field("organization_guid");
-        if (org_guid_field != null) {
-          if (org_guid_field.schema().type() == Schema.Type.STRING) {
-            org_guid = s.getString("organization_guid");
-          } else if (org_guid_field.schema().type() == Schema.Type.BYTES) {
+        Struct s = envelope.getStruct(beforeOrAfter);
+        org.apache.kafka.connect.data.Field orgGuidField = s.schema().field("organization_guid");
+        if (orgGuidField != null) {
+          if (orgGuidField.schema().type() == Schema.Type.STRING) {
+            orgGuid = s.getString("organization_guid");
+          } else if (orgGuidField.schema().type() == Schema.Type.BYTES) {
             byte[] bs = s.getBytes("organization_guid");
             if (bs != null) {
-              org_guid = convertBytesToUUID(bs);
+              orgGuid = convertBytesToUUID(bs);
             }
           } else {
-            LOGGER.error("Table {} has wrong type for organization_guid field.", table_name);
+            LOGGER.error("Table {} has wrong type for organization_guid field.", tableName);
           }
         }
       }
 
-      return Optional.ofNullable(org_guid);
+      return Optional.ofNullable(orgGuid);
     } catch (DataException e) {
       LOGGER.info("Fail to extract organization guid in payload {}.", envelope);
       return Optional.empty();
