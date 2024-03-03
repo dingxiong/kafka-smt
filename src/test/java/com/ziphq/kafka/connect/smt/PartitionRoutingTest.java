@@ -140,7 +140,7 @@ public class PartitionRoutingTest {
   @Test
   public void routeAssociationMessages() {
     final String guid = "2810200F8F0647F98382DCCBF98D0E40";
-    final SourceRecord eventRecord =
+    SourceRecord eventRecord =
         buildSourceRecord("association", buildAssociationRow(guid, guid), CREATE);
 
     final Optional<String> orgGuid =
@@ -150,6 +150,21 @@ public class PartitionRoutingTest {
     SourceRecord transformed = partitionRoutingTransformation.apply(eventRecord);
 
     assertEquals(transformed.kafkaPartition(), Integer.valueOf(5));
+
+    // source_org_guid != null && target_org_guid == null
+    eventRecord = buildSourceRecord("association", buildAssociationRow(guid, null), CREATE);
+    transformed = partitionRoutingTransformation.apply(eventRecord);
+    assertEquals(transformed.kafkaPartition(), Integer.valueOf(5));
+
+    // source_org_guid != null && target_org_guid == null
+    eventRecord = buildSourceRecord("association", buildAssociationRow(null, guid), CREATE);
+    transformed = partitionRoutingTransformation.apply(eventRecord);
+    assertEquals(transformed.kafkaPartition(), Integer.valueOf(5));
+
+    // source_org_guid == null && target_org_guid == null
+    eventRecord = buildSourceRecord("association", buildAssociationRow(null, null), CREATE);
+    transformed = partitionRoutingTransformation.apply(eventRecord);
+    assertNull(transformed.kafkaPartition());
   }
 
   @Test
@@ -302,19 +317,26 @@ public class PartitionRoutingTest {
   }
 
   private Struct buildAssociationRow(String sourceOrgGuid, String targetOrgGuid) {
-    return new Struct(ASSOCIATION_SCHEMA)
-        .put("association_type_id", 1205)
-        .put("created_at", 1709243987000L)
-        .put("creator_guid", "18ff1573-f1d1-415e-ab60-9f58ebdc969d")
-        .put("id", 334166534L)
-        .put("source_guid", "ab273636-e4c7-4e1b-91f7-c702b3e1ce38")
-        .put("source_id", 47072302L)
-        .put("status", 0)
-        .put("target_guid", "5c96d688-9c05-4e03-81a2-1311e0baa85f")
-        .put("target_id", 47072328L)
-        .put("updated_at", 1709243987000L)
-        .put("source_organization_guid", ByteBuffer.wrap(hexStringToByteArray(sourceOrgGuid)))
-        .put("target_organization_guid", ByteBuffer.wrap(hexStringToByteArray(targetOrgGuid)));
+    Struct ret =
+        new Struct(ASSOCIATION_SCHEMA)
+            .put("association_type_id", 1205)
+            .put("created_at", 1709243987000L)
+            .put("creator_guid", "18ff1573-f1d1-415e-ab60-9f58ebdc969d")
+            .put("id", 334166534L)
+            .put("source_guid", "ab273636-e4c7-4e1b-91f7-c702b3e1ce38")
+            .put("source_id", 47072302L)
+            .put("status", 0)
+            .put("target_guid", "5c96d688-9c05-4e03-81a2-1311e0baa85f")
+            .put("target_id", 47072328L)
+            .put("updated_at", 1709243987000L);
+
+    if (sourceOrgGuid != null)
+      ret.put("source_organization_guid", ByteBuffer.wrap(hexStringToByteArray(sourceOrgGuid)));
+
+    if (targetOrgGuid != null)
+      ret.put("target_organization_guid", ByteBuffer.wrap(hexStringToByteArray(targetOrgGuid)));
+
+    return ret;
   }
 
   private Struct buildObjectColumnIndexRow(String orgGuid) {
