@@ -8,7 +8,7 @@ on:
       - main
 
 jobs:
-  spotless:
+  tests and spotless:
     runs-on: ubuntu-latest
 
     steps:
@@ -21,3 +21,5 @@ jobs:
         cache: maven
     - name: run spotless check
       run: mvn spotless:check
+    - name: run unit tests
+      run: mvn test
